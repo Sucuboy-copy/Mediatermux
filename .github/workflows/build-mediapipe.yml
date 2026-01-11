@@ -29,7 +29,10 @@ jobs:
           git \
           python3-dev \
           python3-pip \
-          crossbuild-essential-arm64
+          gcc-aarch64-linux-gnu \
+          g++-aarch64-linux-gnu \
+          crossbuild-essential-arm64 \
+          qemu-user-static
     
     - name: Install Android NDK
       run: |
@@ -54,18 +57,26 @@ jobs:
       run: |
         cd mediapipe
         
-        # Configurar para cross-compilation
-        pip install wheel setuptools numpy
+        # Instalar dependencias de Python
+        pip install wheel setuptools numpy cython
         
-        # Build con soporte ARM64
+        # Configurar variables de entorno para cross-compilation
         export CC=aarch64-linux-gnu-gcc
         export CXX=aarch64-linux-gnu-g++
+        export AR=aarch64-linux-gnu-ar
+        export RANLIB=aarch64-linux-gnu-ranlib
+        export LD=aarch64-linux-gnu-ld
         
-        # Intentar build
-        python setup.py bdist_wheel --plat-name=linux_aarch64
+        # Intentar build con platform específica
+        python setup.py bdist_wheel --plat-name=linux_aarch64 || \
+        python setup.py bdist_wheel --plat-name=manylinux2014_aarch64 || \
+        python setup.py bdist_wheel
+        
+        # Mostrar lo que se generó
+        ls -lh dist/
         
     - name: Upload wheel artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: mediapipe-wheel
         path: mediapipe/dist/*.whl
