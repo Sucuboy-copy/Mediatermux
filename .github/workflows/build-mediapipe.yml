@@ -1,0 +1,82 @@
+name: Build MediaPipe for Termux (ARM64)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          ninja-build \
+          wget \
+          git \
+          python3-dev \
+          python3-pip \
+          crossbuild-essential-arm64
+    
+    - name: Install Android NDK
+      run: |
+        wget https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+        unzip android-ndk-r25c-linux.zip
+        echo "ANDROID_NDK_HOME=$PWD/android-ndk-r25c" >> $GITHUB_ENV
+    
+    - name: Clone MediaPipe
+      run: |
+        git clone https://github.com/google/mediapipe.git
+        cd mediapipe
+        git checkout v0.10.9
+    
+    - name: Install Bazel
+      run: |
+        wget https://github.com/bazelbuild/bazel/releases/download/6.1.0/bazel-6.1.0-installer-linux-x86_64.sh
+        chmod +x bazel-6.1.0-installer-linux-x86_64.sh
+        ./bazel-6.1.0-installer-linux-x86_64.sh --user
+        echo "$HOME/bin" >> $GITHUB_PATH
+    
+    - name: Build MediaPipe Python package (ARM64)
+      run: |
+        cd mediapipe
+        
+        # Configurar para cross-compilation
+        pip install wheel setuptools numpy
+        
+        # Build con soporte ARM64
+        export CC=aarch64-linux-gnu-gcc
+        export CXX=aarch64-linux-gnu-g++
+        
+        # Intentar build
+        python setup.py bdist_wheel --plat-name=linux_aarch64
+        
+    - name: Upload wheel artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: mediapipe-wheel
+        path: mediapipe/dist/*.whl
+        retention-days: 30
+    
+    - name: Create Release
+      if: github.event_name == 'workflow_dispatch'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v1.0.0-termux
+        name: MediaPipe for Termux ARM64
+        files: mediapipe/dist/*.whl
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
