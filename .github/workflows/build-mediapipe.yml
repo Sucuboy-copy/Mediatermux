@@ -1,4 +1,4 @@
-name: Build MediaPipe for Termux (ARM64)
+name: Build MediaPipe Simple (Docker)
 
 on:
   workflow_dispatch:
@@ -6,64 +6,67 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
+  build-in-docker:
     runs-on: ubuntu-latest
     
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
       with:
-        python-version: '3.10'
+        platforms: arm64
     
-    - name: Install dependencies
+    - name: Build MediaPipe in ARM64 container
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          cmake \
-          ninja-build \
-          wget \
-          git \
-          python3-dev \
-          python3-pip \
-          gcc-aarch64-linux-gnu \
-          g++-aarch64-linux-gnu \
-          crossbuild-essential-arm64 \
-          qemu-user-static
+        docker run --platform linux/arm64 --rm \
+          -v $PWD:/workspace \
+          arm64v8/python:3.10-slim \
+          bash -c "
+            apt-get update && \
+            apt-get install -y build-essential cmake git wget && \
+            pip install --upgrade pip && \
+            pip install wheel setuptools numpy && \
+            cd /workspace && \
+            git clone --depth 1 --branch v0.10.14 https://github.com/google/mediapipe.git && \
+            cd mediapipe && \
+            # Arreglar version si es necesario
+            if grep -q \"version = 'dev'\" setup.py; then \
+              sed -i \"s/version = 'dev'/version = '0.10.14'/\" setup.py; \
+            fi && \
+            pip wheel . -w /workspace/wheels --no-deps || \
+            python setup.py bdist_wheel && \
+            cp dist/*.whl /workspace/wheels/ 2>/dev/null || true
+          "
     
-    - name: Install Android NDK
+    - name: List built wheels
       run: |
-        wget https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
-        unzip android-ndk-r25c-linux.zip
-        echo "ANDROID_NDK_HOME=$PWD/android-ndk-r25c" >> $GITHUB_ENV
+        ls -lh wheels/ || ls -lh mediapipe/dist/ || echo "No wheels found"
     
-    - name: Clone MediaPipe
-      run: |
-        git clone https://github.com/google/mediapipe.git
-        cd mediapipe
-        git checkout v0.10.9
+    - name: Upload wheels
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: mediapipe-arm64-wheels
+        path: |
+          wheels/*.whl
+          mediapipe/dist/*.whl
+        retention-days: 30
+        if-no-files-found: warn
     
-    - name: Install Bazel
-      run: |
-        wget https://github.com/bazelbuild/bazel/releases/download/6.1.0/bazel-6.1.0-installer-linux-x86_64.sh
-        chmod +x bazel-6.1.0-installer-linux-x86_64.sh
-        ./bazel-6.1.0-installer-linux-x86_64.sh --user
-        echo "$HOME/bin" >> $GITHUB_PATH
-    
-    - name: Build MediaPipe Python package (ARM64)
-      run: |
-        cd mediapipe
-        
-        # Instalar dependencias de Python
-        pip install wheel setuptools numpy cython
-        
-        # Configurar variables de entorno para cross-compilation
-        export CC=aarch64-linux-gnu-gcc
-        export CXX=aarch64-linux-gnu-g++
-        export AR=aarch64-linux-gnu-ar
+    - name: Create Release
+      if: github.event_name == 'workflow_dispatch'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: build-${{ github.run_number }}
+        name: MediaPipe ARM64 Build ${{ github.run_number }}
+        files: |
+          wheels/*.whl
+          mediapipe/dist/*.whl
+        fail_on_unmatched_files: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}        export AR=aarch64-linux-gnu-ar
         export RANLIB=aarch64-linux-gnu-ranlib
         export LD=aarch64-linux-gnu-ld
         
